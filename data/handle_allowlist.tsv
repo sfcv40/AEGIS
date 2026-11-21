@@ -21,6 +21,7 @@ WerFault.exe	Microsoft	%SystemRoot%\System32\
 taskmgr.exe	Microsoft	%SystemRoot%\System32\
 explorer.exe	Microsoft	%SystemRoot%\
 dwm.exe	Microsoft	%SystemRoot%\System32\
+conhost.exe	Microsoft	%SystemRoot%\System32\
 audiodg.exe	Microsoft	%SystemRoot%\System32\
 MsMpEng.exe	Microsoft	%ProgramData%\Microsoft\Windows Defender\Platform\
 MsMpEng.exe	Microsoft	%ProgramFiles%\Windows Defender\
