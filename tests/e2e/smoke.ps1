@@ -76,7 +76,10 @@ foreach ($f in $scanOut, $monOut) {
 Write-Host "---- monitor stderr ----"
 if (Test-Path $monErr) { Get-Content $monErr }
 Write-Host "---- findings ----"
-$findings | Where-Object { $_.type -eq 'finding' } | ForEach-Object { Write-Host ("{0,-22} {1,-9} {2}" -f $_.rule, $_.severity, $_.title) }
+$findings | Where-Object { $_.type -eq 'finding' } | ForEach-Object {
+  Write-Host ("{0,-22} {1,-9} {2}" -f $_.rule, $_.severity, $_.title)
+  Write-Host ("    " + ($_.evidence | ConvertTo-Json -Compress))
+}
 Write-Host "---- summaries ----"
 $findings | Where-Object { $_.type -eq 'summary' } | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 4 }
 
