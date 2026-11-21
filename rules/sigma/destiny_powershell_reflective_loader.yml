@@ -1,0 +1,37 @@
+title: Destiny PowerShell Reflective PE Loader
+id: 7f3a2c1e-5b8d-4e0a-9c61-2d4f8a9e1b70
+status: experimental
+description: >
+  Detects the Destiny in-memory loader (launch-memory.ps1) in PowerShell script block
+  logs. The script uses AssemblyBuilder P/Invoke to VirtualAlloc an RWX region, maps a PE,
+  registers its unwind table and calls the DestinyInMemoryEntry export.
+references:
+  - docs/analysis/destiny.md
+author: AEGIS
+date: 2026-11-21
+tags:
+  - attack.execution
+  - attack.t1059.001
+  - attack.defense-evasion
+  - attack.t1620
+logsource:
+  product: windows
+  category: ps_script
+  definition: Script Block Logging. PowerShell logs this script at Warning level even without the policy, because it calls DefinePInvokeMethod.
+detection:
+  family:
+    ScriptBlockText|contains:
+      - 'DestinyMemDynamicAsm'
+      - 'DestinyMemNative'
+      - 'DestinyInMemoryEntry'
+      - 'DestinySetNvDllBytes'
+  generic_loader:
+    ScriptBlockText|contains|all:
+      - 'DefinePInvokeMethod'
+      - 'VirtualAlloc'
+      - 'RtlAddFunctionTable'
+      - 'GetDelegateForFunctionPointer'
+  condition: family or generic_loader
+falsepositives:
+  - Red team tooling or PE loaders used for testing (generic_loader branch)
+level: high
