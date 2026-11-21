@@ -95,3 +95,4 @@ if (-not $KeepFixtures) {
 }
 if ($missing) { throw "missing rules: $($missing -join ', ')" }
 Write-Host "e2e OK: $($rules.Count) distinct rules fired"
+exit 0  # aegis exits 1 when it has hits, which is expected here
