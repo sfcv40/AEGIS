@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  logic-and-rules:
+    name: Logic tests and rule compile (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run unit tests
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+      - name: Compile YARA rules
+        run: |
+          pip install yara-python
+          python -I tests/test_yara_rules.py tests
+
+  windows:
+    name: Windows build, unit tests and end-to-end smoke test
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: build/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-x64-windows-static-${{ hashFiles('vcpkg.json') }}
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static
+      - name: Build
+        run: cmake --build build --config Release -j
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Rule list
+        run: build\Release\aegis.exe rules
+      - name: End-to-end smoke test
+        shell: powershell
+        run: .\tests\e2e\smoke.ps1 -Exe build\Release\aegis.exe -Work "$env:RUNNER_TEMP\aegis-e2e"
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: ${{ runner.temp }}/aegis-e2e/*.jsonl
+      - name: Upload aegis.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-windows-x64
+          path: build/Release/aegis.exe

@@ -188,3 +188,17 @@
     (/api/v1/irl/ws) to a phone, via frappe.win or a local HTTP server (USB tethering, LAN, or
     adb reverse). B3 window checks see nothing in this mode, so this rule and A1 carry it.
     Map listeners to PIDs with GetExtendedTcpTable.
+
+- id: AEGIS-DESTINY-012
+  title: Destiny executable in execution records
+  roadmap: [baseline]
+  families: [Destiny]
+  severity: high
+  confidence: medium
+  source: file
+  match:
+    execution_record_name_any: [DESTINY.EXE, DESTINYSCRIPTS.EXE]
+  notes: >
+    Prefetch and BAM record Destiny.exe when it is run from disk. The fileless launch leaves
+    only powershell.exe, so a miss here proves nothing; see GEN-002 and DESTINY-008/009/010.
+    Names alone are weak; confirm with YARA AEGIS_Destiny_Client when the file still exists.

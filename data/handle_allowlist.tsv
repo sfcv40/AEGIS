@@ -1,0 +1,47 @@
+# AEGIS handle-holder allowlist for AEGIS-GEN-001 / GEN-003 and the ETW OpenProcess rule (GEN-041).
+#
+# Columns (tab separated): image name | signer prefix | normalised path prefix
+#   image name     exact file name, or * for any
+#   signer prefix  Authenticode signer must start with this; * = any valid signer;
+#                  - = unsigned accepted (name + path only, weaker: keep these rare)
+#   path prefix    normalised path (tokens: %SystemRoot% %ProgramFiles% %ProgramFiles(x86)%
+#                  %ProgramData% %LOCALAPPDATA% %APPDATA% %USERPROFILE%), or *
+#
+# Script hosts and LOLBins (powershell, pwsh, wscript, cscript, mshta, rundll32, regsvr32,
+# msbuild, InstallUtil, dotnet) can never be allowlisted: AEGIS-GEN-002 ignores this file.
+# Keep entries keyed on signer + path, never name alone (roadmap A1).
+
+# Windows components that hold handles to every process
+csrss.exe	Microsoft	%SystemRoot%\System32\
+lsass.exe	Microsoft	%SystemRoot%\System32\
+services.exe	Microsoft	%SystemRoot%\System32\
+wininit.exe	Microsoft	%SystemRoot%\System32\
+svchost.exe	Microsoft	%SystemRoot%\System32\
+WerFault.exe	Microsoft	%SystemRoot%\System32\
+taskmgr.exe	Microsoft	%SystemRoot%\System32\
+explorer.exe	Microsoft	%SystemRoot%\
+dwm.exe	Microsoft	%SystemRoot%\System32\
+audiodg.exe	Microsoft	%SystemRoot%\System32\
+MsMpEng.exe	Microsoft	%ProgramData%\Microsoft\Windows Defender\Platform\
+MsMpEng.exe	Microsoft	%ProgramFiles%\Windows Defender\
+NisSrv.exe	Microsoft	%ProgramData%\Microsoft\Windows Defender\Platform\
+MsSense.exe	Microsoft	%ProgramFiles%\Windows Defender Advanced Threat Protection\
+GameBar.exe	Microsoft	%ProgramFiles%\WindowsApps\
+GameBarFTServer.exe	Microsoft	%ProgramFiles%\WindowsApps\
+
+# Roblox's own processes (the crash handler and launcher hold full handles to the client)
+*	Roblox Corporation	*
+
+# Roblox bootstrappers. They launch the client, so they hold the CreateProcess handle.
+# Bloxstrap and Fishstrap releases are not reliably code-signed, hence "-".
+Bloxstrap.exe	-	%LOCALAPPDATA%\Bloxstrap\
+Fishstrap.exe	-	%LOCALAPPDATA%\Fishstrap\
+
+# Overlays and capture (roadmap A1 FP list). Verify the signer strings on a clean PC
+# with `aegis signer <file>` before adding more.
+*	NVIDIA Corporation	%ProgramFiles%\NVIDIA Corporation\
+*	NVIDIA Corporation	%SystemRoot%\System32\
+*	Advanced Micro Devices	%ProgramFiles%\AMD\
+Discord.exe	Discord Inc.	%LOCALAPPDATA%\Discord\
+steam.exe	Valve	%ProgramFiles(x86)%\Steam\
+gameoverlayui.exe	Valve	%ProgramFiles(x86)%\Steam\

@@ -1,0 +1,5 @@
+# Domains tied to cheat infrastructure. Used by AEGIS-DESTINY-007 (DNS cache and DNS-Client ETW)
+# and AEGIS-EXEC-004 (Zone.Identifier HostUrl / ReferrerUrl). Subdomains match too.
+# Columns (tab separated): domain | family
+frappe.win	Destiny
+offsets.imtheo.lol	generic-external
