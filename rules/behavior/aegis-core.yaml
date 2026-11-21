@@ -1,0 +1,336 @@
+# AEGIS core rules for the Tier 1 roadmap signals (A2 to A6) that are not tied to one
+# cheat family. Same schema as the other files in this folder (see rules/README.md).
+
+# ---- A2: live ETW rules on the Roblox process ----
+
+- id: AEGIS-GEN-040
+  title: Thread created in Roblox by another process
+  roadmap: [A2, B2]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: etw.process
+  match:
+    event: ThreadStart
+    target_image: RobloxPlayerBeta.exe
+    creator_pid_ne_target_pid: true
+    creator_not_in_allowlist: true
+  notes: >
+    Kernel-Process ThreadStart is logged in the creator's context, so the event header PID is
+    the creator. The first thread of a new Roblox process is created by its launcher and is
+    skipped. Neither Destiny nor FORSAKEN does this; it covers injectors.
+
+- id: AEGIS-GEN-041
+  title: Roblox opened with write or thread rights (live OpenProcess audit)
+  roadmap: [A1, A2]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: etw.audit_api
+  match:
+    api: OpenProcess
+    target_image: RobloxPlayerBeta.exe
+    desired_access_any: [PROCESS_VM_WRITE, PROCESS_VM_OPERATION, PROCESS_CREATE_THREAD]
+    caller_not_in_allowlist: true      # script hosts are never allowlisted
+  notes: Live counterpart to GEN-001. Catches injectors that hold the handle for less than one sampling interval.
+  correlate: [AEGIS-GEN-001, AEGIS-GEN-002]
+
+- id: AEGIS-GEN-042
+  title: DLL loaded into Roblox from a user-writable path or without a valid signature
+  roadmap: [A2]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: etw.image
+  match:
+    process_image: RobloxPlayerBeta.exe
+    any:
+      - image_path_user_writable: true
+        image_path_not_under: Roblox version folders
+      - image_unsigned: true
+        image_path_not_under: Roblox version folders
+
+- id: AEGIS-GEN-043
+  title: .NET runtime loaded into Roblox
+  roadmap: [A2]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: etw.image
+  match:
+    process_image: RobloxPlayerBeta.exe
+    image_name_any: [clr.dll, coreclr.dll]
+  notes: Roblox has no managed code. A CLR inside it means a C# executor or injected loader.
+
+# ---- A3: drivers ----
+
+- id: AEGIS-DRV-001
+  title: Loaded kernel driver is on the vulnerable or malicious driver list
+  roadmap: [A3]
+  families: [generic]
+  severity: high
+  confidence: high
+  source: driver
+  match:
+    loaded: true
+    sha256_in: data/vulnerable_drivers.tsv
+  false_positives: [RGB, fan control and overclocking tools ship known-vulnerable drivers]
+  correlate: [AEGIS-SYS-002, AEGIS-SYS-005, AEGIS-TAMP-001]
+
+- id: AEGIS-DRV-002
+  title: Installed driver service points at a file on the vulnerable or malicious driver list
+  roadmap: [A3]
+  families: [generic]
+  severity: medium
+  confidence: high
+  source: driver
+  match:
+    registry: HKLM\SYSTEM\CurrentControlSet\Services\<name> Type=1|2
+    sha256_in: data/vulnerable_drivers.tsv
+
+- id: AEGIS-DRV-003
+  title: Kernel driver service installed from a user-writable path
+  roadmap: [A3]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: eventlog
+  match:
+    channel: System
+    event_id: 7045
+    service_type: kernel mode driver
+    image_path_user_writable: true
+  notes: kdmapper-style loaders drop a vulnerable driver in %TEMP%, load it and delete it. The 7045 record survives.
+
+# ---- A4: system integrity ----
+
+- id: AEGIS-SYS-001
+  title: Kernel Code Integrity is disabled
+  roadmap: [A4]
+  families: [generic]
+  severity: critical
+  confidence: high
+  source: system
+  match: { code_integrity_options_not: CODEINTEGRITY_OPTION_ENABLED }
+
+- id: AEGIS-SYS-002
+  title: Test signing is enabled
+  roadmap: [A4]
+  families: [generic]
+  severity: high
+  confidence: high
+  source: system
+  match: { code_integrity_options: CODEINTEGRITY_OPTION_TESTSIGN }
+  correlate: [AEGIS-DRV-001]
+
+- id: AEGIS-SYS-003
+  title: Code Integrity debug mode is enabled
+  roadmap: [A4]
+  families: [generic]
+  severity: high
+  confidence: high
+  source: system
+  match: { code_integrity_options: CODEINTEGRITY_OPTION_DEBUGMODE_ENABLED }
+
+- id: AEGIS-SYS-004
+  title: Kernel debugger is enabled
+  roadmap: [A4]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: system
+  match: { SystemKernelDebuggerInformation: KernelDebuggerEnabled }
+
+- id: AEGIS-SYS-005
+  title: Microsoft vulnerable driver blocklist is turned off
+  roadmap: [A4]
+  families: [generic]
+  severity: medium
+  confidence: medium
+  source: registry
+  match: { key: 'HKLM\SYSTEM\CurrentControlSet\Control\CI\Config', value: VulnerableDriverBlocklistEnable, data_equals: 0 }
+  correlate: [AEGIS-DRV-001]
+
+- id: AEGIS-SYS-006
+  title: Secure Boot is off
+  roadmap: [A4]
+  families: [generic]
+  severity: low
+  confidence: low
+  source: registry
+  match: { key: 'HKLM\SYSTEM\CurrentControlSet\Control\SecureBoot\State', value: UEFISecureBootEnabled, data_equals: 0 }
+  false_positives: [Older or legacy-BIOS PCs. Context only.]
+
+- id: AEGIS-SYS-007
+  title: Defender real-time protection turned off by policy or setting
+  roadmap: [A4]
+  families: [generic]
+  severity: medium
+  confidence: low
+  source: registry
+  match:
+    any:
+      - { key: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection', value: DisableRealtimeMonitoring, data_equals: 1 }
+      - { key: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender', value: DisableAntiSpyware, data_equals: 1 }
+      - { key: 'HKLM\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection', value: DisableRealtimeMonitoring, data_equals: 1 }
+  false_positives: [A third-party antivirus puts Defender in passive mode]
+
+- id: AEGIS-SYS-008
+  title: Defender tamper protection is off
+  roadmap: [A4]
+  families: [generic]
+  severity: low
+  confidence: low
+  source: registry
+  match: { key: 'HKLM\SOFTWARE\Microsoft\Windows Defender\Features', value: TamperProtection, data_in: [0, 4] }
+
+# ---- A5: anti-forensics and tamper ----
+
+- id: AEGIS-TAMP-001
+  title: Security event log was cleared
+  roadmap: [A5]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: eventlog
+  match: { channel: Security, event_id: 1102, within_days: 30 }
+
+- id: AEGIS-TAMP-002
+  title: An event log was cleared
+  roadmap: [A5]
+  families: [generic]
+  severity: medium
+  confidence: medium
+  source: eventlog
+  match: { channel: System, event_id: 104, within_days: 30 }
+  false_positives: [PC cleaner tools]
+
+- id: AEGIS-TAMP-003
+  title: System clock was set backwards
+  roadmap: [A5]
+  families: [generic]
+  severity: medium
+  confidence: low
+  source: eventlog
+  match: { channel: Security, event_id: 4616, previous_minus_new_seconds_gt: 600, within_days: 30 }
+
+- id: AEGIS-TAMP-004
+  title: NTFS change journal was recreated recently
+  roadmap: [A5, A7]
+  families: [generic]
+  severity: medium
+  confidence: medium
+  source: system
+  match: { volume: system drive, usn_journal_created_within_days: 14, usn_journal_created_after_install_days: 2 }
+  notes: The USN journal ID is the creation FILETIME. `fsutil usn deletejournal` followed by recreation resets it.
+
+- id: AEGIS-TAMP-005
+  title: Prefetch is disabled
+  roadmap: [A5]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: registry
+  match: { key: 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters', value: EnablePrefetcher, data_equals: 0 }
+
+- id: AEGIS-TAMP-006
+  title: Prefetch folder is nearly empty
+  roadmap: [A5]
+  families: [generic]
+  severity: medium
+  confidence: low
+  source: file
+  match: { folder: '%SystemRoot%\Prefetch', pf_count_lt: 10, prefetch_enabled: true, uptime_hours_gt: 2 }
+
+- id: AEGIS-TAMP-007
+  title: Defender exclusion added for a user-writable path
+  roadmap: [A5]
+  families: [generic]
+  severity: medium
+  confidence: medium
+  source: eventlog
+  match: { channel: Microsoft-Windows-Windows Defender/Operational, event_id: 5007, new_value_contains: '\Exclusions\', path_user_writable: true, within_days: 30 }
+
+- id: AEGIS-TAMP-008
+  title: Defender protection was turned off
+  roadmap: [A5]
+  families: [generic]
+  severity: medium
+  confidence: medium
+  source: eventlog
+  match: { channel: Microsoft-Windows-Windows Defender/Operational, event_id_any: [5001, 5010, 5012], within_days: 30 }
+
+# ---- A6: executor artifacts ----
+
+- id: AEGIS-EXEC-001
+  title: Executor folder layout found
+  roadmap: [A6]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: file
+  match:
+    roots: ['%USERPROFILE%\Desktop', '%USERPROFILE%\Downloads', '%USERPROFILE%\Documents', '%LOCALAPPDATA%', '%APPDATA%', '%TEMP%']
+    max_depth: 3
+    has_file_ext: .exe
+    has_dir: autoexec
+    has_dir_any: [workspace, scripts, bin]
+
+- id: AEGIS-EXEC-002
+  title: Executor-only Luau script found
+  roadmap: [A6]
+  families: [generic]
+  severity: medium
+  confidence: medium
+  source: file
+  match:
+    only_inside: folders that hit AEGIS-EXEC-001
+    ext_any: [.lua, .luau, .txt]
+    tokens: 'loadstring(game:HttpGet( alone, or two of getgenv hookfunction getrawmetatable setreadonly firetouchinterest hookmetamethod getnamecallmethod newcclosure checkcaller fireclickdetector getconnections'
+  notes: Only the matched token names are reported, never script text.
+
+- id: AEGIS-EXEC-004
+  title: File downloaded from a known cheat distribution domain
+  roadmap: [A6]
+  families: [generic]
+  severity: high
+  confidence: high
+  source: file
+  match:
+    roots: ['%USERPROFILE%\Downloads', '%USERPROFILE%\Desktop']
+    ext_any: [.exe, .dll, .zip, .rar, .7z, .ps1]
+    zone_identifier_host_in: data/cheat_domains.tsv
+  notes: Reports the matched domain only, not the full URL.
+
+# ---- YARA ----
+
+- id: AEGIS-YARA-001
+  title: YARA rule matched a file
+  roadmap: [A6]
+  families: [generic]
+  severity: high
+  confidence: high
+  source: file
+  match: { yara: rules/yara/*.yar }
+  notes: Title, severity and family come from the matching YARA rule's meta.
+
+- id: AEGIS-YARA-002
+  title: YARA rule matched executable memory in a suspicious process
+  roadmap: [B1]
+  families: [generic]
+  severity: high
+  confidence: high
+  source: memory
+  match: { scope: private executable regions of processes that hit GEN-002 or DESTINY-008, yara: rules/yara/*.yar }
+
+# ---- Self-protection (roadmap section 6) ----
+
+- id: AEGIS-SELF-001
+  title: AEGIS live telemetry session was stopped or lost events
+  roadmap: [S]
+  families: [generic]
+  severity: high
+  confidence: medium
+  source: self
+  match: { etw_session_query_fails_or_events_lost: true }
+  notes: Cheats may stop the ETW session (ControlTrace stop) to blind AEGIS.

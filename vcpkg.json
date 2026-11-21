@@ -1,0 +1,6 @@
+{
+  "name": "aegis",
+  "version": "0.1.0",
+  "description": "Usermode anticheat for Roblox",
+  "dependencies": ["yara"]
+}
