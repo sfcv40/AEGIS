@@ -1,0 +1,35 @@
+# FORSAKEN / KILLYWARE family rules. See docs/analysis/forsaken.md.
+
+- id: AEGIS-FORSAKEN-001
+  title: FORSAKEN overlay window present
+  roadmap: [B3]
+  families: [FORSAKEN]
+  severity: high
+  confidence: high
+  source: window
+  match:
+    class_name: FORSAKEN_EXTERNAL_OVERLAY_HOST
+    or_title: FORSAKEN External Overlay
+
+- id: AEGIS-FORSAKEN-002
+  title: KILLYWARE license or config files present
+  roadmap: [A6]
+  families: [FORSAKEN]
+  severity: high
+  confidence: high
+  source: file
+  match:
+    path_any: ['%LOCALAPPDATA%\KILLYWARE\license.dat', '%LOCALAPPDATA%\KILLYWARE\config_last.bin']
+  notes: Persist after the cheat closes, so this is a strong historical signal. license.dat holds an HWID lock.
+
+- id: AEGIS-FORSAKEN-003
+  title: FORSAKEN or KILLYWARE executable in execution records
+  roadmap: [baseline]
+  families: [FORSAKEN]
+  severity: high
+  confidence: medium
+  source: file
+  match:
+    execution_record_name_any: [FORSAKEN.EXE, KILLYWARE.EXE]
+    or_yara: AEGIS_Forsaken_External
+  notes: Prefetch, Amcache, BAM and ShimCache all record it - FORSAKEN has no fileless mode. Names alone are weak; confirm with the Amcache SHA-1 or a YARA hit.

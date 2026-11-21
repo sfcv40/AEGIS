@@ -1,0 +1,190 @@
+# Destiny (frappe.win) family rules. See docs/analysis/destiny.md.
+
+- id: AEGIS-DESTINY-001
+  title: Destiny named kernel objects present
+  roadmap: [A6]
+  families: [Destiny]
+  severity: high
+  confidence: high
+  source: named_object
+  match:
+    name_regex_any:
+      - '^\\Sessions\\\d+\\BaseNamedObjects\\Destiny_Instance_Shutdown$'     # Event, main client
+      - '\\BaseNamedObjects\\DestinyMem_[0-9a-f]{32}$'                         # Section, in-memory hand-off
+      - '\\BaseNamedObjects\\DestinyEvt_[0-9a-f]{32}$'                         # Event, in-memory hand-off
+      - '\\BaseNamedObjects\\NV_BIOSMETH_(STATUS|UNLOAD)_\d+$'                 # Section / Event, NVIDIA module
+      - '\\BaseNamedObjects\\FRAPPE_NV_BLOCK_FBC$'                             # Event, Global or Local
+  notes: >
+    Enumerate \Sessions\<n>\BaseNamedObjects and \BaseNamedObjects with NtQueryDirectoryObject.
+    The DestinyMem_/DestinyEvt_ pair only lives for a few seconds while the loader hands off to
+    the hidden worker, so also check it from the A2 process-start hook.
+
+- id: AEGIS-DESTINY-002
+  title: nv_biosmeth module staged in Windows Temp
+  roadmap: [A6, A7]
+  families: [Destiny]
+  severity: high
+  confidence: high
+  source: file
+  match:
+    path_regex: '^%SystemRoot%\\Temp\\nv_biosmeth(_v5)?(_\d+)?\.dll$'
+  notes: >
+    Destiny copies the DLL here, sets the DACL D:(A;;GRGX;;;WD)(A;;GRGX;;;AC)(A;;GA;;;BA)(A;;GA;;;SY)
+    and deletes its Zone.Identifier stream before injecting it. Check the USN journal (A7) for
+    create/delete of these names, since the file is removed on unload. Also YARA-scan with
+    AEGIS_Destiny_NvBiosmeth_Dll.
+
+- id: AEGIS-DESTINY-003
+  title: Unsigned module loaded into an NVIDIA capture process
+  roadmap: [A2]
+  families: [Destiny]
+  severity: high
+  confidence: high
+  source: etw.image
+  match:
+    process_image_any: [nvcontainer.exe, NVIDIA Overlay.exe, NVIDIA app.exe, NVIDIA Share.exe, nvsphelper64.exe, NVDisplay.Container.exe]
+    image_signer_not: NVIDIA Corporation
+    image_path_not_under: ['%ProgramFiles%', '%SystemRoot%\System32', '%SystemRoot%\SysWOW64']
+  notes: >
+    Destiny does not inject into Roblox. It injects into the NVIDIA ShadowPlay stack instead
+    (LoadLibraryW via CreateRemoteThread), so the A2 rule "DLL load into Roblox" stays silent.
+    Watch these processes too.
+
+- id: AEGIS-DESTINY-004
+  title: Remote thread created in NVIDIA or AMD capture process by a non-vendor process
+  roadmap: [A2, B2]
+  families: [Destiny]
+  severity: high
+  confidence: high
+  source: etw.process
+  match:
+    event: ThreadStart
+    target_image_any: [nvcontainer.exe, NVIDIA Overlay.exe, NVIDIA app.exe, NVIDIA Share.exe, nvsphelper64.exe, AMDRSServ.exe]
+    creator_pid_ne_target_pid: true
+    creator_signer_not_any: [NVIDIA Corporation, Advanced Micro Devices, Inc.]
+  notes: Start address is kernel32!LoadLibraryW (inject) or kernel32!FreeLibrary (unload).
+
+- id: AEGIS-DESTINY-005
+  title: Capture software opened with write/thread rights by a non-vendor process
+  roadmap: [A2]
+  families: [Destiny]
+  severity: high
+  confidence: medium
+  source: etw.audit_api
+  match:
+    api: OpenProcess
+    target_image_any: [nvcontainer.exe, NVIDIA Overlay.exe, NVIDIA app.exe, NVIDIA Share.exe, AMDRSServ.exe]
+    desired_access_any: [PROCESS_VM_WRITE, PROCESS_CREATE_THREAD]
+    caller_signer_not_any: [NVIDIA Corporation, Advanced Micro Devices, Inc., Microsoft Windows]
+  notes: >
+    Observed masks: 0x43A (inject), 0x40A (unload) on NVIDIA processes; 0x438 then VirtualProtectEx +
+    WriteProcessMemory on AMDRSServ.exe (byte-patches ReLive to force the DuplicateDesktop path).
+    Any tool tampering with recording software while Roblox runs is worth a reviewer's look.
+
+- id: AEGIS-DESTINY-006
+  title: ShadowPlay or ReLive capture settings tampered
+  roadmap: [A5]
+  families: [Destiny]
+  severity: medium
+  confidence: medium
+  source: registry
+  match:
+    any:
+      - key: 'HKCU\SOFTWARE\NVIDIA Corporation\Global\ShadowPlay\NVSPCAPS'
+        value: '{1B1D3DAA-601D-49E5-8508-81736CA28C6D}'
+        data_equals: 0
+      - key_deleted_regex: '^(HKLM|HKCU)\\SOFTWARE\\NVIDIA Corporation\\Global\\(NvApp\\)?ShadowPlay\\FTS$'
+      - key: 'HKCU\SOFTWARE\AMD\DVR'
+        value: FullRangeOutputOverride
+        writer_not_vendor: true
+  notes: >
+    NVSPCAPS values DwmEnabled / DwmEnabledUser / DwmDvrEnabledV1 / IsShadowPlayEnabled are also
+    forced to 1. These can change for legitimate reasons, so use as corroboration, and record the
+    key's last-write time.
+
+- id: AEGIS-DESTINY-007
+  title: Contact with Destiny infrastructure
+  roadmap: [A6]
+  families: [Destiny]
+  severity: high
+  confidence: high
+  source: dns
+  match:
+    query_name_any: [frappe.win, offsets.imtheo.lol]
+    query_name_suffix_any: [.frappe.win]
+  notes: >
+    Read the DNS client cache (DnsGetCacheDataTable) at session start and periodically, and the
+    Microsoft-Windows-DNS-Client ETW provider live. offsets.imtheo.lol is a public offsets feed
+    used by other Roblox externals too, so treat it as generic-external evidence, frappe.win as
+    Destiny-specific. Paths: /api/v1/client/config, /api/v1/irl/ws, /downloads/Destiny.exe,
+    /downloads/nv_biosmeth.dll. User agents: DestinyClient/0.1, DestinyClient-IRL/0.1,
+    DestinyClient-IRL-Video/0.1, DestinyLoader/1.0, DestinyScriptBridge/1.0.
+
+- id: AEGIS-DESTINY-008
+  title: Hidden elevated PowerShell worker started with an encoded command
+  roadmap: [B5]
+  families: [Destiny, generic]
+  severity: medium
+  confidence: medium
+  source: etw.process
+  match:
+    image_any: [powershell.exe, pwsh.exe]
+    command_line_all_regex: ['(?i)-EncodedCommand\s', '(?i)-WindowStyle\s+Hidden', '(?i)-NonInteractive', '(?i)-ExecutionPolicy\s+Bypass']
+    parent_image_any: [powershell.exe, pwsh.exe]
+  notes: >
+    Decode the base64 (UTF-16LE). Destiny's worker bootstrap contains
+    MemoryMappedFile]::OpenExisting('DestinyMem_<guid>') and EventWaitHandle]::OpenExisting('DestinyEvt_<guid>').
+    Raise to critical when the same PID later holds a Roblox handle (AEGIS-GEN-002).
+  correlate: [AEGIS-GEN-002, AEGIS-DESTINY-009]
+
+- id: AEGIS-DESTINY-009
+  title: Dynamic assembly with P/Invoke loader names inside PowerShell
+  roadmap: [A2]
+  families: [Destiny]
+  severity: high
+  confidence: high
+  source: etw.dotnet
+  match:
+    event: AssemblyLoad
+    process_image_any: [powershell.exe, pwsh.exe]
+    assembly_name_any: [DestinyMemDynamicAsm]
+    module_name_any: [DestinyMemDynamicMod]
+  notes: Generic form - any AssemblyBuilder-defined assembly in PowerShell that defines P/Invoke to VirtualAlloc + RtlAddFunctionTable (see sigma rule).
+
+- id: AEGIS-DESTINY-010
+  title: Reflectively mapped PE in a script host
+  roadmap: [B1]
+  families: [Destiny, generic]
+  severity: critical
+  confidence: high
+  source: memory
+  match:
+    process_image_any: [powershell.exe, pwsh.exe]
+    region_type: MEM_PRIVATE
+    region_protect_any: [PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_READ]
+    region_starts_with_pe_header: true
+    yara_any: [AEGIS_Destiny_Client]
+  notes: >
+    The loader allocates the full SizeOfImage as one RWX private region (VirtualAlloc 0x3000, 0x40)
+    and copies the headers in, so the MZ/PE header sits at the region base. Only scan script
+    hosts that hit GEN-002 or DESTINY-008 to keep cost and privacy impact low. A memory scan of
+    PowerShell is far cheaper and safer than one of Roblox (no Hyperion interference).
+
+- id: AEGIS-DESTINY-011
+  title: LAN or USB viewer server run by a process holding a Roblox handle (IRL mode)
+  roadmap: [B3]
+  families: [Destiny]
+  severity: high
+  confidence: medium
+  source: network
+  match:
+    listening_tcp: true
+    owner_holds_roblox_handle: true
+  also:
+    - process_image: adb.exe
+      command_line_regex: '(?i)\breverse\s+tcp:\d+\s+tcp:\d+'
+  notes: >
+    In --irl mode Destiny draws no local overlay. It streams ESP frames as JSON over a WebSocket
+    (/api/v1/irl/ws) to a phone, via frappe.win or a local HTTP server (USB tethering, LAN, or
+    adb reverse). B3 window checks see nothing in this mode, so this rule and A1 carry it.
+    Map listeners to PIDs with GetExtendedTcpTable.

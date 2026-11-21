@@ -1,0 +1,31 @@
+title: Destiny Hidden PowerShell Worker Hand-off
+id: 0c9e4b52-8a7d-4f13-b2e6-61a5d3f08c44
+status: experimental
+description: Detects the hidden, optionally elevated PowerShell worker that Destiny's loader spawns and feeds through a named memory-mapped file.
+references:
+  - docs/analysis/destiny.md
+author: AEGIS
+date: 2026-11-21
+tags:
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    ParentImage|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains|all:
+      - '-EncodedCommand'
+      - '-WindowStyle Hidden'
+      - '-ExecutionPolicy Bypass'
+      - '-NonInteractive'
+  condition: selection
+falsepositives:
+  - Admin automation that relaunches itself hidden; decode the command and look for DestinyMem_ / DestinyEvt_
+level: medium

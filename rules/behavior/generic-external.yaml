@@ -1,0 +1,126 @@
+# Generic rules for external (out-of-process) Roblox cheats.
+# Written against Destiny and FORSAKEN, but neither name is needed to fire.
+
+- id: AEGIS-GEN-001
+  title: Non-allowlisted process holds a read/write handle to Roblox
+  roadmap: [A1]
+  families: [Destiny, FORSAKEN]
+  severity: high
+  confidence: high
+  source: handle
+  match:
+    target_image: RobloxPlayerBeta.exe
+    granted_access_any: [PROCESS_VM_WRITE, PROCESS_VM_OPERATION, PROCESS_CREATE_THREAD]
+    holder_not_in_allowlist: true      # allowlist keyed on signer + path
+  false_positives: [AV/EDR, GPU driver helpers, game capture (OBS, Discord, NVIDIA) - allowlist by signer+path]
+  notes: >
+    Both cheats open Roblox with 0x438 (VM_READ|VM_WRITE|VM_OPERATION|QUERY_INFORMATION).
+    Sample the handle table at least every 2 s; both cheats keep the handle for the whole session.
+
+- id: AEGIS-GEN-002
+  title: Script host or LOLBin holds any VM handle to Roblox
+  roadmap: [A1, B5]
+  families: [Destiny]
+  severity: critical
+  confidence: high
+  source: handle
+  match:
+    target_image: RobloxPlayerBeta.exe
+    granted_access_any: [PROCESS_VM_READ, PROCESS_VM_WRITE, PROCESS_VM_OPERATION]
+    holder_image_any: [powershell.exe, pwsh.exe, powershell_ise.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, msbuild.exe, InstallUtil.exe, dotnet.exe]
+  notes: >
+    Closes Destiny's main gap. In in-memory mode the handle is held by a Microsoft-signed
+    powershell.exe, so a rule that only flags *unsigned* holders misses it. Script hosts must
+    never be on the A1 allowlist, whatever their signer. Read-only access counts here too,
+    because Destiny falls back to 0x410 (VM_READ|QUERY_INFORMATION) when write is denied.
+
+- id: AEGIS-GEN-003
+  title: Read-only VM handle to Roblox from an unknown process
+  roadmap: [A1]
+  families: [Destiny, FORSAKEN]
+  severity: medium
+  confidence: medium
+  source: handle
+  match:
+    target_image: RobloxPlayerBeta.exe
+    granted_access_all: [PROCESS_VM_READ]
+    holder_not_in_allowlist: true
+  notes: ESP-only configurations of both cheats can run with 0x410. Weaker than GEN-001 but still unusual.
+
+- id: AEGIS-GEN-010
+  title: Topmost click-through layered window covering the Roblox client
+  roadmap: [B3]
+  families: [Destiny, FORSAKEN]
+  severity: medium
+  confidence: medium
+  source: window
+  match:
+    ex_style_all: [WS_EX_TOPMOST, WS_EX_LAYERED]
+    ex_style_any: [WS_EX_TRANSPARENT, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW]
+    rect_overlaps_window_class: WINDOWSCLIENT     # Roblox client window class
+    overlap_ratio_min: 0.8
+    owner_not_in_allowlist: true
+  false_positives: [Discord/Steam/NVIDIA/AMD/Xbox Game Bar overlays, MSI Afterburner/RTSS, screen recorders]
+  notes: >
+    Destiny ex-style 0x082800A8 (adds WS_EX_NOREDIRECTIONBITMAP and DirectComposition);
+    FORSAKEN 0x00080088 then toggles WS_EX_TRANSPARENT|WS_EX_NOACTIVATE at runtime.
+    Raise confidence when the owner also matches GEN-001/002.
+  correlate: [AEGIS-GEN-001, AEGIS-GEN-002]
+
+- id: AEGIS-GEN-011
+  title: Window excluded from screen capture over Roblox
+  roadmap: [B3]
+  families: [Destiny, FORSAKEN]
+  severity: high
+  confidence: medium
+  source: window
+  match:
+    display_affinity_any: [WDA_EXCLUDEFROMCAPTURE, WDA_MONITOR]   # 0x11, 0x1
+    rect_overlaps_window_class: WINDOWSCLIENT
+    owner_not_in_allowlist: true
+  notes: >
+    Query GetWindowDisplayAffinity from AEGIS's own process. Destiny's nv_biosmeth.dll spoofs
+    this API only inside the NVIDIA processes it injects into, not system-wide, so AEGIS still
+    sees the true value. Few legitimate apps set this on a full-screen topmost window.
+
+- id: AEGIS-GEN-020
+  title: Injected mouse input while Roblox is focused, from a process holding a Roblox handle
+  roadmap: [B4]
+  families: [Destiny, FORSAKEN]
+  severity: high
+  confidence: medium
+  source: input
+  match:
+    ll_mouse_flag: LLMHF_INJECTED
+    foreground_image: RobloxPlayerBeta.exe
+    sender_holds_roblox_handle: true     # join with handle sampler by PID when attributable
+  notes: >
+    Both cheats' triggerbot / aimlock use SendInput. Destiny's humanisation settings
+    (jitter, curves, reaction delay) change timing but not the LLMHF_INJECTED flag.
+    Attribution to a PID is best effort; without it, use rate and correlation.
+  correlate: [AEGIS-GEN-001, AEGIS-GEN-002]
+
+- id: AEGIS-GEN-021
+  title: Global low-level mouse hook installed by a process holding a Roblox handle
+  roadmap: [B4]
+  families: [FORSAKEN]
+  severity: medium
+  confidence: medium
+  source: input
+  match:
+    hook_type: WH_MOUSE_LL
+    owner_holds_roblox_handle: true
+  notes: FORSAKEN installs WH_MOUSE_LL to filter out its own injected clicks (it checks LLMHF_INJECTED).
+
+- id: AEGIS-GEN-030
+  title: Roblox ClientAppSettings.json written by a non-Roblox process
+  roadmap: [A6]
+  families: [Destiny]
+  severity: low
+  confidence: low
+  source: file
+  match:
+    path_glob: '%LOCALAPPDATA%\{Roblox,Bloxstrap,Fishstrap}\Versions\*\ClientSettings\ClientAppSettings.json'
+    writer_image_not_any: [RobloxPlayerBeta.exe, RobloxPlayerInstaller.exe, Bloxstrap.exe, Fishstrap.exe]
+  false_positives: [FPS unlockers and hand-edited FFlags are common and mostly harmless]
+  notes: Context only. Destiny pushes server-supplied FFlags here before launch. Record the flag names as evidence.
