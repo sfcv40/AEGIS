@@ -20,8 +20,10 @@ jobs:
           ctest --test-dir build --output-on-failure
       - name: Compile YARA rules
         run: |
-          pip install yara-python
-          python -I tests/test_yara_rules.py tests
+          # -I ignores user site-packages, so install into a venv rather than --user.
+          python -m venv .venv
+          .venv/bin/pip install yara-python
+          .venv/bin/python -I tests/test_yara_rules.py tests
 
   windows:
     name: Windows build, unit tests and end-to-end smoke test
